@@ -30,6 +30,7 @@ mod pick_list {
         fn all_size(self, size: impl Into<Pixels>) -> Self {
             let size = size.into();
             self.text_size(size)
+                .text_shaping(iced::widget::text::Shaping::Advanced)
                 .handle(iced::widget::pick_list::Handle::Arrow { size: Some(size) })
         }
     }

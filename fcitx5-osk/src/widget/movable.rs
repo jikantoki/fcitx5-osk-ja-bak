@@ -2365,7 +2365,7 @@ where
             AdvancedMovableListState::Init => {
                 if self.text_to_id.is_some() && self.id_to_element.is_some() {
                     row = row.push(
-                        ExtButton::new(text("Add", self.control_row_text_size))
+                        ExtButton::new(text("追加", self.control_row_text_size).shaping(iced::widget::text::Shaping::Advanced))
                             .class(Theme::lv1_button_class(&self.class))
                             .padding(self.control_row_button_padding)
                             .on_release_with(Some(|| {
@@ -2374,7 +2374,7 @@ where
                     )
                 }
                 row = row.push(
-                    ExtButton::new(text("Edit", self.control_row_text_size))
+                    ExtButton::new(text("編集", self.control_row_text_size).shaping(iced::widget::text::Shaping::Advanced))
                         .class(Theme::lv1_button_class(&self.class))
                         .padding(self.control_row_button_padding)
                         .on_release_with(Some(|| {
@@ -2400,10 +2400,11 @@ where
                             PickList::new(variants, add_text.clone(), |s| {
                                 AdvancedMovableListInnerMessage::UpdateAddText(s).into()
                             })
+                            .text_shaping(iced::widget::text::Shaping::Advanced)
                             .class(Theme::pick_list_class(&self.class)),
                         )
                         .push(
-                            ExtButton::new(text("Add", self.control_row_text_size))
+                            ExtButton::new(text("追加", self.control_row_text_size).shaping(iced::widget::text::Shaping::Advanced))
                                 .class(Theme::lv2_add_button_class(&self.class))
                                 .padding(self.control_row_button_padding)
                                 .on_release_with(Some(|| {
@@ -2425,7 +2426,7 @@ where
                                 .on_submit(AdvancedMovableListInnerMessage::AddItem.into()),
                         )
                         .push(
-                            ExtButton::new(text("Add", self.control_row_text_size))
+                            ExtButton::new(text("追加", self.control_row_text_size).shaping(iced::widget::text::Shaping::Advanced))
                                 .class(Theme::lv2_add_button_class(&self.class))
                                 .padding(self.control_row_button_padding)
                                 .on_release_with(Some(|| {
@@ -2438,13 +2439,13 @@ where
                 row = row
                     .push(add_text)
                     .push(
-                        ExtButton::new(text("Done", self.control_row_text_size))
+                        ExtButton::new(text("完了", self.control_row_text_size).shaping(iced::widget::text::Shaping::Advanced))
                             .class(Theme::lv2_done_button_class(&self.class))
                             .padding(self.control_row_button_padding)
                             .on_release_with(Some(|| AdvancedMovableListInnerMessage::Done.into())),
                     )
                     .push(
-                        ExtButton::new(text("Cancel", self.control_row_text_size))
+                        ExtButton::new(text("キャンセル", self.control_row_text_size).shaping(iced::widget::text::Shaping::Advanced))
                             .class(Theme::lv2_cancel_button_class(&self.class))
                             .padding(self.control_row_button_padding)
                             .on_release_with(Some(|| {
@@ -2455,13 +2456,13 @@ where
             AdvancedMovableListState::Edit { .. } => {
                 row = row
                     .push(
-                        ExtButton::new(text("Done", self.control_row_text_size))
+                        ExtButton::new(text("完了", self.control_row_text_size).shaping(iced::widget::text::Shaping::Advanced))
                             .class(Theme::lv2_done_button_class(&self.class))
                             .padding(self.control_row_button_padding)
                             .on_release_with(Some(|| AdvancedMovableListInnerMessage::Done.into())),
                     )
                     .push(
-                        ExtButton::new(text("Cancel", self.control_row_text_size))
+                        ExtButton::new(text("キャンセル", self.control_row_text_size).shaping(iced::widget::text::Shaping::Advanced))
                             .class(Theme::lv2_cancel_button_class(&self.class))
                             .padding(self.control_row_button_padding)
                             .on_release_with(Some(|| {

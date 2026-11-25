@@ -473,7 +473,7 @@ impl ConfigState {
             config_manager,
             updatable_fields: vec![
                 Field {
-                    name: "Width",
+                    name: "幅",
                     id: "width",
                     typ: RangeDesc::<f32> {
                         init_value: |state| state.keyboard_window_size().width.val(),
@@ -497,7 +497,7 @@ impl ConfigState {
                     should_display: default_should_display,
                 },
                 Field {
-                    name: "Placement",
+                    name: "配置",
                     id: "placement",
                     typ: OwnedEnumDesc::<Placement> {
                         cur_value: |state| Some(state.placement()),
@@ -511,7 +511,7 @@ impl ConfigState {
                     should_display: default_should_display,
                 },
                 Field {
-                    name: "Indicator Display",
+                    name: "呼び出しボタンの表示",
                     id: "indicator_display",
                     typ: OwnedEnumDesc::<IndicatorDisplay> {
                         cur_value: |state| Some(state.indicator_display()),
@@ -527,7 +527,7 @@ impl ConfigState {
                     should_display: default_should_display,
                 },
                 Field {
-                    name: "Manual Mode",
+                    name: "手動モード",
                     id: "manual_mode",
                     typ: BoolDesc {
                         cur_value: |state| state.config().manual_mode(),
@@ -538,7 +538,7 @@ impl ConfigState {
                     should_display: default_should_display,
                 },
                 Field {
-                    name: "Manual Mode(Session)",
+                    name: "手動モード（このセッション）",
                     id: "session_manual_mode",
                     typ: BoolDesc {
                         cur_value: |state| state.session_manual_mode().unwrap_or(false),
@@ -549,7 +549,7 @@ impl ConfigState {
                     should_display: |state| state.session_manual_mode().is_some(),
                 },
                 Field {
-                    name: "Ignore Fcitx Show",
+                    name: "Fcitx からの表示要求を無視",
                     id: "ignore_fcitx_show",
                     typ: BoolDesc {
                         cur_value: |state| state.config().ignore_fcitx_show(),
@@ -560,7 +560,7 @@ impl ConfigState {
                     should_display: default_should_display,
                 },
                 Field {
-                    name: "Quick Action Bar",
+                    name: "クイックアクションバー",
                     id: "quick_action_bar_state",
                     typ: OwnedEnumDesc::<QuickActionBarState> {
                         cur_value: |state| Some(state.config().quick_action_bar_state()),
@@ -574,7 +574,7 @@ impl ConfigState {
                     should_display: default_should_display,
                 },
                 Field {
-                    name: "Custom Actions",
+                    name: "カスタムアクション",
                     id: "custom_actions",
                     typ: MultiSelectionDesc::<String> {
                         variants: |state: &dyn StateExtractor| {
@@ -614,7 +614,7 @@ impl ConfigState {
                     should_display: default_should_display,
                 },
                 Field {
-                    name: "Dark Theme",
+                    name: "ダークテーマ",
                     id: "dark_theme",
                     typ: DynamicEnumDesc::<String> {
                         variants_and_selected: |state| {
@@ -645,7 +645,7 @@ impl ConfigState {
                     should_display: default_should_display,
                 },
                 Field {
-                    name: "Light Theme",
+                    name: "ライトテーマ",
                     id: "light_theme",
                     typ: DynamicEnumDesc::<String> {
                         variants_and_selected: |state| {
@@ -778,7 +778,7 @@ fn default_should_display(_state: &dyn StateExtractor) -> bool {
 
 fn preferred_output_name_field() -> Field {
     Field {
-        name: "Preferred Output",
+        name: "表示するディスプレイ",
         id: "preferred_output_name",
         typ: DynamicEnumDesc::<String> {
             variants_and_selected: |state| {
@@ -798,7 +798,7 @@ fn preferred_output_name_field() -> Field {
                 {
                     selected = Some(ValueAndDescription {
                         value: name.clone(),
-                        desc: format!("{name} (Not Connected)"),
+                        desc: format!("{name}（未接続）"),
                     })
                 }
                 (variants, selected)
@@ -813,10 +813,10 @@ fn preferred_output_name_field() -> Field {
 
 fn preferred_output_name_custom_field() -> Field {
     Field {
-        name: "Preferred Output(Custom)",
+        name: "表示するディスプレイ（名前を入力）",
         id: "preferred_output_name",
         typ: TextDesc {
-            placeholder: |_, _| Some("The name of the preferred output, like: DP-1".to_string()),
+            placeholder: |_, _| Some("ディスプレイ名（例: DP-1）".to_string()),
             is_enabled: |_| true,
             init_value: |state| state.config().preferred_output_name().cloned(),
             submit_message: |s| UpdateConfigEvent::PreferredOutputName(s).into(),

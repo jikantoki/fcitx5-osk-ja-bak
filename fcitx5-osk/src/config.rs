@@ -316,7 +316,9 @@ impl AsMut<Config> for ConfigManager {
 )]
 pub enum Placement {
     #[default]
+    #[strum(to_string = "ドック")]
     Dock,
+    #[strum(to_string = "フロート")]
     Float,
 }
 
@@ -325,8 +327,11 @@ pub enum Placement {
 )]
 pub enum IndicatorDisplay {
     #[default]
+    #[strum(to_string = "自動")]
     Auto,
+    #[strum(to_string = "常に表示")]
     AlwaysOn,
+    #[strum(to_string = "常に隠す")]
     AlwaysOff,
 }
 
@@ -335,7 +340,10 @@ pub enum IndicatorDisplay {
 )]
 pub enum QuickActionBarState {
     #[default]
+    #[strum(to_string = "オフ")]
     Off,
+    #[strum(to_string = "オン")]
     On,
+    #[strum(to_string = "切り替え")]
     Toggle,
 }
