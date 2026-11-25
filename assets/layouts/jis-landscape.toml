@@ -1,0 +1,108 @@
+# JIS配列（日本語109キーボード風）の横画面レイアウト
+name = "jis-landscape"
+
+[[elements]]
+height = 6
+spacing = 1
+# 7 + 13 * 8 + 8 + 14 = 133
+elements = ["k1:7", "k2", "k3", "k4", "k5", "k6", "k7", "k8", "k9", "k10", "k11", "k12", "k13", "k14", "k15"]
+
+[[elements]]
+height = 6
+spacing = 1
+# 11 + 12 * 8 + 13 + 13 = 133
+elements = ["k16:11", "k17", "k18", "k19", "k20", "k21", "k22", "k23", "k24", "k25", "k26", "k27", "k28", "k29:13"]
+
+[[elements]]
+height = 6
+spacing = 1
+# 13 + 12 * 8 + 11 + 13 = 133
+elements = ["k30:13", "k31", "k32", "k33", "k34", "k35", "k36", "k37", "k38", "k39", "k40", "k41", "k42", "k43:11"]
+
+[[elements]]
+height = 6
+spacing = 1
+# 18 + 11 * 8 + 15 + 12 = 133
+elements = ["k44:18", "k45", "k46", "k47", "k48", "k49", "k50", "k51", "k52", "k53", "k54", "k55", "k56:15"]
+
+[[elements]]
+height = 6
+spacing = 1
+# 8 + 9 + 8 + 8 + 9 + 33 + 9 + 9 + 8 + 5 * 4 + 12 = 133
+elements = ["k57", "k58:9", "k59", "k60", "k61:9", "k62:33", "k63:9", "k64:9", "k65", "k66:5", "k67:5", "k68:5", "k69:5"]
+
+[key_mappings]
+# 1段目
+k1 = "k_jis_zenkaku_hankaku"
+k2 = "k_one"
+k3 = "k_jis_two"
+k4 = "k_three"
+k5 = "k_four"
+k6 = "k_five"
+k7 = "k_jis_six"
+k8 = "k_jis_seven"
+k9 = "k_jis_eight"
+k10 = "k_jis_nine"
+k11 = "k_jis_zero"
+k12 = "k_jis_minus"
+k13 = "k_jis_caret"
+k14 = "k_jis_yen"
+k15 = "k_backspace"
+# 2段目
+k16 = "k_tab"
+k17 = "k_q"
+k18 = "k_w"
+k19 = "k_e"
+k20 = "k_r"
+k21 = "k_t"
+k22 = "k_y"
+k23 = "k_u"
+k24 = "k_i"
+k25 = "k_o"
+k26 = "k_p"
+k27 = "k_jis_at"
+k28 = "k_jis_open_bracket"
+k29 = "k_enter"
+# 3段目
+k30 = "k_caps_lock"
+k31 = "k_a"
+k32 = "k_s"
+k33 = "k_d"
+k34 = "k_f"
+k35 = "k_g"
+k36 = "k_h"
+k37 = "k_j"
+k38 = "k_k"
+k39 = "k_l"
+k40 = "k_jis_semicolon"
+k41 = "k_jis_colon"
+k42 = "k_jis_close_bracket"
+k43 = "k_enter"
+# 4段目
+k44 = "k_left_shift"
+k45 = "k_z"
+k46 = "k_x"
+k47 = "k_c"
+k48 = "k_v"
+k49 = "k_b"
+k50 = "k_n"
+k51 = "k_m"
+k52 = "k_comma"
+k53 = "k_dot"
+k54 = "k_slash"
+k55 = "k_jis_ro"
+k56 = "k_right_shift"
+# 5段目
+k57 = "k_escape"
+k58 = "k_left_ctrl"
+k59 = "k_left_super"
+k60 = "k_left_alt"
+k61 = "k_jis_muhenkan"
+k62 = "k_space"
+k63 = "k_jis_henkan"
+k64 = "k_jis_hiragana_katakana"
+k65 = "k_right_ctrl"
+k66 = "k_left_arrow"
+k67 = "k_up_arrow"
+k68 = "k_down_arrow"
+k69 = "k_right_arrow"

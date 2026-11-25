@@ -1,0 +1,29 @@
+[package]
+name = "fcitx5-osk-kwin-launcher"
+autobins = false
+authors.workspace = true
+version.workspace = true
+edition.workspace = true
+license-file.workspace = true
+keywords.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "fcitx5-osk-ja-kwin-launcher"
+path = "src/main.rs"
+
+[dependencies]
+fcitx5-osk-common.workspace = true
+
+anyhow.workspace = true
+clap.workspace = true
+getset.workspace = true
+serde.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+zbus.workspace = true
+zvariant.workspace = true
+futures-util.workspace = true
+
+[features]
+console-subscriber = ["fcitx5-osk-common/console-subscriber"]

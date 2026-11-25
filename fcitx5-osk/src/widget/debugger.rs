@@ -1,0 +1,196 @@
+use iced::{
+    Element, Event, Length, Rectangle, Size, Vector,
+    advanced::{
+        Clipboard, Layout, Shell, Widget, layout, overlay, renderer,
+        widget::{Operation, Tree, tree},
+    },
+    mouse::{Cursor, Interaction},
+};
+
+pub struct LayoutDebugger<'a, Message, Theme = iced::Theme, Renderer = iced::Renderer> {
+    name: String,
+    content: Element<'a, Message, Theme, Renderer>,
+}
+
+impl<'a, Message, Theme, Renderer> LayoutDebugger<'a, Message, Theme, Renderer>
+where
+    Renderer: renderer::Renderer,
+{
+    pub fn new(name: &str, content: impl Into<Element<'a, Message, Theme, Renderer>>) -> Self {
+        Self {
+            name: name.into(),
+            content: content.into(),
+        }
+    }
+}
+
+#[derive(Default)]
+struct LayoutDebuggerState {
+    bounds: Rectangle,
+    viewport: Rectangle,
+}
+
+impl<Message, Theme, Renderer> Widget<Message, Theme, Renderer>
+    for LayoutDebugger<'_, Message, Theme, Renderer>
+where
+    Message: Clone,
+    Renderer: renderer::Renderer,
+{
+    fn tag(&self) -> tree::Tag {
+        tree::Tag::of::<LayoutDebuggerState>()
+    }
+
+    fn state(&self) -> tree::State {
+        tree::State::new(LayoutDebuggerState::default())
+    }
+
+    fn children(&self) -> Vec<Tree> {
+        vec![Tree::new(&self.content)]
+    }
+
+    fn diff(&self, tree: &mut Tree) {
+        tree.diff_children(std::slice::from_ref(&self.content));
+    }
+
+    fn size(&self) -> Size<Length> {
+        self.content.as_widget().size()
+    }
+
+    fn layout(
+        &mut self,
+        tree: &mut Tree,
+        renderer: &Renderer,
+        limits: &layout::Limits,
+    ) -> layout::Node {
+        let l = self
+            .content
+            .as_widget_mut()
+            .layout(&mut tree.children[0], renderer, limits);
+        let state: &mut LayoutDebuggerState = tree.state.downcast_mut();
+        let bounds = l.bounds();
+        if bounds != state.bounds {
+            tracing::debug!(
+                "The layout of {} is changed from {:?} to {:?}",
+                self.name,
+                state.bounds,
+                bounds
+            );
+            state.bounds = bounds;
+        }
+        l
+    }
+
+    fn operate(
+        &mut self,
+        tree: &mut Tree,
+        layout: Layout<'_>,
+        renderer: &Renderer,
+        operation: &mut dyn Operation,
+    ) {
+        self.content
+            .as_widget_mut()
+            .operate(&mut tree.children[0], layout, renderer, operation);
+    }
+
+    fn update(
+        &mut self,
+        tree: &mut Tree,
+        event: &Event,
+        layout: Layout<'_>,
+        cursor: Cursor,
+        renderer: &Renderer,
+        clipboard: &mut dyn Clipboard,
+        shell: &mut Shell<'_, Message>,
+        viewport: &Rectangle,
+    ) {
+        let state: &mut LayoutDebuggerState = tree.state.downcast_mut();
+        if *viewport != state.viewport {
+            tracing::debug!(
+                "The viewport of drawing {} is changed from {:?} to {:?}",
+                self.name,
+                state.viewport,
+                viewport
+            );
+            state.viewport = *viewport;
+        }
+        self.content.as_widget_mut().update(
+            &mut tree.children[0],
+            event,
+            layout,
+            cursor,
+            renderer,
+            clipboard,
+            shell,
+            viewport,
+        )
+    }
+
+    fn mouse_interaction(
+        &self,
+        tree: &Tree,
+        layout: Layout<'_>,
+        cursor: Cursor,
+        viewport: &Rectangle,
+        renderer: &Renderer,
+    ) -> Interaction {
+        self.content.as_widget().mouse_interaction(
+            &tree.children[0],
+            layout,
+            cursor,
+            viewport,
+            renderer,
+        )
+    }
+
+    fn draw(
+        &self,
+        tree: &Tree,
+        renderer: &mut Renderer,
+        theme: &Theme,
+        renderer_style: &renderer::Style,
+        layout: Layout<'_>,
+        cursor: Cursor,
+        viewport: &Rectangle,
+    ) {
+        self.content.as_widget().draw(
+            &tree.children[0],
+            renderer,
+            theme,
+            renderer_style,
+            layout,
+            cursor,
+            viewport,
+        );
+    }
+
+    fn overlay<'b>(
+        &'b mut self,
+        tree: &'b mut Tree,
+        layout: Layout<'b>,
+        renderer: &Renderer,
+        viewport: &Rectangle,
+        translation: Vector,
+    ) -> Option<overlay::Element<'b, Message, Theme, Renderer>> {
+        self.content.as_widget_mut().overlay(
+            &mut tree.children[0],
+            layout,
+            renderer,
+            viewport,
+            translation,
+        )
+    }
+}
+
+impl<'a, Message, Theme, Renderer> From<LayoutDebugger<'a, Message, Theme, Renderer>>
+    for Element<'a, Message, Theme, Renderer>
+where
+    Message: 'a + Clone,
+    Theme: 'a,
+    Renderer: 'a + renderer::Renderer,
+{
+    fn from(
+        widget: LayoutDebugger<'a, Message, Theme, Renderer>,
+    ) -> Element<'a, Message, Theme, Renderer> {
+        Element::new(widget)
+    }
+}

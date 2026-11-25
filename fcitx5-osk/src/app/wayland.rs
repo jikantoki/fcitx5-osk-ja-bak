@@ -1,0 +1,252 @@
+use std::{cell::RefCell, vec};
+
+use anyhow::Result;
+use connection::WaylandConnection;
+use fcitx5_osk_common::signal::ShutdownFlag;
+use iced::{
+    Element, Subscription, Task, Theme,
+    futures::stream::{self, Iter},
+    theme::Style,
+    window::Id,
+};
+use iced_layershell::{
+    Settings, build_pattern,
+    settings::{LayerShellSettings, StartMode},
+    to_layer_message,
+};
+
+pub use crate::app::wayland::output::{OutputContext, OutputGeometry};
+use crate::{
+    app::{self, Keyboard, MapTask, Message, wayland::input_method::InputMethodContext},
+    config::ConfigManager,
+    font,
+    misc::NamedSubscriptionData,
+    state::WindowManagerEvent,
+    window::{WindowManagerMode, wayland::WaylandWindowManager},
+};
+
+use super::AsyncAppState;
+
+mod connection;
+mod input_method;
+mod output;
+
+#[to_layer_message(multi)]
+#[derive(Clone, Debug)]
+pub enum WaylandMessage {
+    Inner(Message),
+}
+
+impl From<Message> for WaylandMessage {
+    fn from(value: Message) -> Self {
+        Self::Inner(value)
+    }
+}
+
+struct WaylandKeyboard {
+    input_method_context: InputMethodContext,
+    output_context: OutputContext,
+    shutdown_flag: ShutdownFlag,
+    inner: Keyboard<WaylandWindowManager>,
+}
+
+impl WaylandKeyboard {
+    pub fn new(
+        config_manager: ConfigManager,
+        input_method_context: InputMethodContext,
+        output_context: OutputContext,
+        wait_for_socket: bool,
+        modifier_workaround: bool,
+        shutdown_flag: ShutdownFlag,
+    ) -> (Self, Task<Message>) {
+        let wayland_window_manager = WaylandWindowManager::new(
+            output_context.clone(),
+            config_manager.as_ref().preferred_output_name().cloned(),
+        );
+        let (async_state, config_manager) = match super::run_async({
+            let shutdown_flag = shutdown_flag.clone();
+            async move {
+                let res = AsyncAppState::new(
+                    config_manager.as_ref(),
+                    wait_for_socket,
+                    modifier_workaround,
+                    shutdown_flag,
+                )
+                .await;
+                res.map(|r| (r, config_manager))
+            }
+        }) {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::error!("Unable to create AsyncAppState: {e:#?}");
+                panic!("Unable to create AsyncAppState");
+            }
+        };
+
+        let (inner, task) = Keyboard::new(
+            async_state,
+            config_manager,
+            wayland_window_manager,
+            wait_for_socket,
+            shutdown_flag.clone(),
+        );
+        (
+            Self {
+                input_method_context,
+                output_context,
+                shutdown_flag,
+                inner,
+            },
+            task,
+        )
+    }
+}
+
+impl WaylandKeyboard {
+    pub fn view(&self, id: Id) -> Element<'_, WaylandMessage> {
+        self.inner.view(id)
+    }
+
+    pub fn subscription(&self) -> Subscription<WaylandMessage> {
+        fn output_context_listen(
+            data: &NamedSubscriptionData<OutputContext>,
+        ) -> Iter<vec::IntoIter<WaylandMessage>> {
+            // These messages only work in the first call
+            let mut once_messages = vec![];
+            // Wayland connection environment variables will be set in the call of `self.inner.subscription()`.
+            if let Err(e) = data.data().listen() {
+                once_messages.push(
+                    app::error_with_context(e, "Unable to listen to the changes of wayland output")
+                        .into(),
+                );
+            }
+            stream::iter(once_messages)
+        }
+
+        let mut subscriptions = vec![
+            self.inner.subscription(),
+            self.input_method_context.subscription(),
+            self.output_context.subscription(),
+        ];
+        subscriptions.push(Subscription::run_with(
+            NamedSubscriptionData::new("external::wayland_once", self.output_context.clone()),
+            output_context_listen,
+        ));
+
+        Subscription::batch(subscriptions)
+    }
+
+    pub fn update(&mut self, message: WaylandMessage) -> Task<WaylandMessage> {
+        if self.shutdown_flag.get().is_shutting_down() {
+            self.input_method_context.close();
+            self.output_context.close();
+        }
+
+        if let WaylandMessage::Inner(message) = message {
+            let input_panel = matches!(
+                &message,
+                Message::WindowManagerEvent(WindowManagerEvent::UpdateMode(
+                    WindowManagerMode::KwinLockScreen,
+                ))
+            );
+            let mut task = self.inner.update(message);
+            if input_panel {
+                match self.input_method_context.keyboard_backend() {
+                    Ok(keyboard_backend) => {
+                        // switch to our input-method-v1 implementation.
+                        task = task.chain(
+                            self.inner
+                                .update(Message::UpdateKeyboardBackend(keyboard_backend)),
+                        );
+                    }
+                    Err(e) => {
+                        task = Task::done(
+                            app::fatal_with_context(
+                                e,
+                                "failed to create KeyboardBackend for input_method_v1",
+                            )
+                            .into(),
+                        );
+                    }
+                }
+            }
+            task
+        } else {
+            Message::from_nothing()
+        }
+    }
+
+    pub fn style(&self, theme: &Theme) -> Style {
+        self.inner.style(theme)
+    }
+
+    pub fn theme(&self, id: Id) -> Theme {
+        self.inner.theme(id)
+    }
+}
+
+pub fn start(
+    config_manager: ConfigManager,
+    init_task: Task<Message>,
+    wait_for_socket: bool,
+    modifier_workaround: bool,
+    shutdown_flag: ShutdownFlag,
+) -> Result<()> {
+    let default_font = if let Some(font) = config_manager.as_ref().default_font() {
+        font::load(font)
+    } else {
+        Default::default()
+    };
+
+    let connection = WaylandConnection::new();
+    let input_method_context = InputMethodContext::new(connection.clone());
+    let output_context = OutputContext::new(connection.clone());
+    let title = clap::crate_name!().to_string();
+
+    let boot = RefCell::new(Some(move || {
+        let (keyboard, task) = WaylandKeyboard::new(
+            config_manager,
+            input_method_context,
+            output_context,
+            wait_for_socket,
+            modifier_workaround,
+            shutdown_flag,
+        );
+        (keyboard, init_task.chain(task).map_task())
+    }));
+
+    build_pattern::daemon(
+        move || {
+            (boot
+                .borrow_mut()
+                .take()
+                .expect("boot can't be called twice"))()
+        },
+        "daemon",
+        WaylandKeyboard::update,
+        WaylandKeyboard::view,
+    )
+    .title(move |_, _| Some(title.clone()))
+    .theme(WaylandKeyboard::theme)
+    .style(WaylandKeyboard::style)
+    .subscription(WaylandKeyboard::subscription)
+    .settings(Settings {
+        layer_settings: LayerShellSettings {
+            start_mode: StartMode::Background,
+            ..Default::default()
+        },
+        default_font,
+        with_connection: Some(
+            (move || {
+                connection
+                    .state()
+                    .inspect_err(|e| tracing::error!("failed to get a connection: {:?}", e))
+                    .map(|s| s.connection().clone())
+            })
+            .into(),
+        ),
+        ..Default::default()
+    })
+    .run()?;
+    Ok(())
+}

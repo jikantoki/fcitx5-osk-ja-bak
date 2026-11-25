@@ -1,0 +1,33 @@
+[package]
+name = "fcitx5-osk-key-helper"
+autobins = false
+description.workspace = true
+authors.workspace = true
+version.workspace = true
+edition.workspace = true
+license-file.workspace = true
+keywords.workspace = true
+repository.workspace = true
+readme.workspace = true
+
+[[bin]]
+name = "fcitx5-osk-ja-key-helper"
+path = "src/main.rs"
+
+[dependencies]
+fcitx5-osk-common.workspace = true
+
+anyhow.workspace = true
+clap.workspace = true
+figment.workspace = true
+getset.workspace = true
+tokio.workspace = true
+serde.workspace = true
+tracing.workspace = true
+zbus.workspace = true
+zvariant.workspace = true
+evdev.workspace = true
+rand.workspace = true
+
+[features]
+console-subscriber = ["fcitx5-osk-common/console-subscriber"]

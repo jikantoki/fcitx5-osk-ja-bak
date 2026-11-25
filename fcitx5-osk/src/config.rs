@@ -1,0 +1,341 @@
+use std::{collections::HashMap, future::Future, path::PathBuf, sync::Arc, time::Duration};
+
+use anyhow::Result;
+use figment::{
+    Figment,
+    providers::{Format, Toml},
+};
+use getset::{CopyGetters, Getters, Setters};
+use iced::futures::{
+    StreamExt,
+    channel::mpsc::{self, TryRecvError, UnboundedSender},
+};
+use serde::{Deserialize, Serialize};
+use strum::EnumIter;
+use tokio::fs;
+
+use crate::layout::KLength;
+
+#[derive(Deserialize, Serialize, CopyGetters, Getters, Setters, Clone)]
+pub struct Config {
+    #[getset(get_copy = "pub")]
+    log_timestamp: Option<bool>,
+
+    #[getset(get = "pub")]
+    #[serde(default)]
+    log_directives: Vec<String>,
+
+    /// Folders storing layout toml files. If not set, the program will search toml files in `fcitx5-osk-ja/layouts` under `$XDG_CONFIG_DIRS` and `$XDG_CONFIG_HOME`. The latter one has higher priority.
+    #[getset(get = "pub")]
+    #[serde(default)]
+    key_area_layout_folders: Vec<PathBuf>,
+
+    /// Folders storing key set toml files. If not set, the program will search toml files in `fcitx5-osk-ja/key_sets` under `$XDG_CONFIG_DIRS` and `$XDG_CONFIG_HOME`. The latter one has higher priority.
+    #[getset(get = "pub")]
+    #[serde(default)]
+    key_set_folders: Vec<PathBuf>,
+
+    /// Folders storing theme toml files. If not set, the program will search toml files in `fcitx5-osk-ja/themes` under `$XDG_CONFIG_DIRS` and `$XDG_CONFIG_HOME`. The latter one has higher priority.
+    #[getset(get = "pub")]
+    #[serde(default)]
+    theme_folders: Vec<PathBuf>,
+
+    /// Folders storing custom action toml files. If not set, the program will search toml files in `fcitx5-osk-ja/custom_actions` under `$XDG_CONFIG_DIRS` and `$XDG_CONFIG_HOME`. The latter one has higher priority.
+    #[getset(get = "pub")]
+    #[serde(default)]
+    custom_action_folders: Vec<PathBuf>,
+
+    #[getset(get_copy = "pub", set = "pub")]
+    #[serde(default = "default_landscape_width")]
+    landscape_width: KLength,
+
+    #[getset(get_copy = "pub", set = "pub")]
+    #[serde(default = "default_portrait_width")]
+    portrait_width: KLength,
+
+    #[getset(get_copy = "pub", set = "pub")]
+    #[serde(with = "humantime_serde", default = "default_holding_timeout")]
+    holding_timeout: Duration,
+
+    #[getset(get = "pub", set = "pub")]
+    #[serde(default = "default_theme")]
+    theme: String,
+
+    #[serde(default)]
+    dark_theme: Option<String>,
+
+    #[serde(default)]
+    light_theme: Option<String>,
+
+    #[getset(get_copy = "pub", set = "pub")]
+    #[serde(default)]
+    placement: Placement,
+
+    /// Default font to be used.
+    #[getset(get = "pub", set = "pub")]
+    #[serde(default)]
+    default_font: Option<String>,
+
+    /// Default nerd font to be used.
+    #[getset(get = "pub", set = "pub")]
+    #[serde(default)]
+    default_nerd_font: Option<String>,
+
+    /// Load fonts by path.
+    #[getset(get = "pub", set = "pub")]
+    #[serde(default)]
+    external_font_paths: Vec<PathBuf>,
+
+    #[getset(get = "pub", set = "pub")]
+    #[serde(default)]
+    im_layout_mapping: HashMap<String, HashMap<String, String>>,
+
+    #[getset(get = "pub", set = "pub")]
+    #[serde(default)]
+    im_font_mapping: HashMap<String, String>,
+
+    #[getset(get_copy = "pub", set = "pub")]
+    #[serde(default = "default_indicator_width")]
+    indicator_width: KLength,
+
+    #[getset(get_copy = "pub", set = "pub")]
+    #[serde(default)]
+    indicator_display: IndicatorDisplay,
+
+    /// Preferred output to be used.
+    #[serde(default)]
+    preferred_output_name: Option<String>,
+
+    /// These keycodes are x11 variant, they are +8 shift of evdev keycodes.
+    #[getset(get = "pub", set = "pub")]
+    #[serde(default = "default_modifier_workaround_keycodes")]
+    modifier_workaround_keycodes: Vec<u16>,
+
+    /// How long will the keyboard wait after receiving a signal from fcitx5.
+    #[getset(get = "pub", set = "pub")]
+    #[serde(with = "humantime_serde", default = "default_hide_delay")]
+    hide_delay: Duration,
+
+    /// How long will the fcitx5 virtual keyboard be enabled after the keyboard is shown.
+    #[getset(get = "pub", set = "pub")]
+    #[serde(
+        with = "humantime_serde",
+        default = "default_enable_fcitx5_virtual_keyboard_delay"
+    )]
+    enable_fcitx5_virtual_keyboard_delay: Duration,
+
+    /// Show or hide only by the user.
+    #[getset(get_copy = "pub", set = "pub")]
+    #[serde(default)]
+    manual_mode: bool,
+
+    /// Ignore `ShowVirtualKeyboard` from fcitx5 while the keyboard is closed.
+    /// Fcitx sends show on every focus, including a mouse click. A show that
+    /// arrives while the keyboard is already open is still honored, so it can
+    /// cancel the hide Fcitx sends after a key.
+    #[getset(get_copy = "pub", set = "pub")]
+    #[serde(default)]
+    ignore_fcitx_show: bool,
+
+    /// Override the builtin landscape layout globally.
+    #[getset(get = "pub", set = "pub")]
+    #[serde(default)]
+    default_landscape_layout: String,
+
+    /// Override the builtin portrait layout globally.
+    #[getset(get = "pub", set = "pub")]
+    #[serde(default)]
+    default_portrait_layout: String,
+
+    /// Quick action bar state
+    #[getset(get_copy = "pub", set = "pub")]
+    #[serde(default)]
+    quick_action_bar_state: QuickActionBarState,
+
+    /// Enabled custom actions
+    #[getset(get = "pub")]
+    #[serde(default)]
+    custom_actions: Vec<String>,
+}
+
+impl Config {
+    pub fn dark_theme(&self) -> Option<&String> {
+        self.dark_theme.as_ref()
+    }
+
+    pub fn set_dark_theme(&mut self, theme: String) {
+        self.dark_theme = Some(theme);
+    }
+
+    pub fn light_theme(&self) -> Option<&String> {
+        self.light_theme.as_ref()
+    }
+
+    pub fn set_light_theme(&mut self, theme: String) {
+        self.light_theme = Some(theme);
+    }
+
+    pub fn preferred_output_name(&self) -> Option<&String> {
+        self.preferred_output_name.as_ref()
+    }
+
+    pub fn set_preferred_output_name(&mut self, name: String) {
+        self.preferred_output_name = Some(name);
+    }
+
+    pub fn set_custom_actions(&mut self, custom_actions: Arc<Vec<String>>) {
+        self.custom_actions = custom_actions.to_vec();
+    }
+}
+
+fn default_landscape_width() -> KLength {
+    (1024.).into()
+}
+
+fn default_portrait_width() -> KLength {
+    (768.).into()
+}
+
+fn default_indicator_width() -> KLength {
+    (80.).into()
+}
+
+fn default_holding_timeout() -> Duration {
+    Duration::from_millis(500)
+}
+
+fn default_hide_delay() -> Duration {
+    Duration::from_millis(1000)
+}
+
+fn default_enable_fcitx5_virtual_keyboard_delay() -> Duration {
+    Duration::from_millis(200)
+}
+
+fn default_theme() -> String {
+    "Auto".to_string()
+}
+
+fn default_modifier_workaround_keycodes() -> Vec<u16> {
+    vec![
+        37,  // Left Ctrl
+        105, // Right Ctrl
+        50,  // Left Shift
+        62,  // Right Shift
+        64,  // Left Alt
+        108, // Right Alt
+    ]
+}
+
+pub struct ConfigManager {
+    _path: Option<PathBuf>,
+    config: Config,
+    writer: UnboundedSender<String>,
+}
+
+impl ConfigManager {
+    pub fn new(
+        path: Option<&PathBuf>,
+    ) -> Result<(Self, impl Future<Output = ()> + 'static + Send + Sync)> {
+        let config = match path {
+            Some(path) if path.exists() => Figment::new().merge(Toml::file(path)).extract()?,
+            _ => Figment::new().extract()?,
+        };
+        let (tx, mut rx) = mpsc::unbounded();
+        let res = Self {
+            _path: path.cloned(),
+            config,
+            writer: tx,
+        };
+        let path = path.cloned();
+        let bg = async move {
+            while let Some(mut latest) = rx.next().await {
+                let closed = loop {
+                    match rx.try_recv() {
+                        Ok(c) => latest = c,
+                        // closed
+                        Err(TryRecvError::Closed) => break true,
+                        // no message
+                        Err(TryRecvError::Empty) => break false,
+                    }
+                };
+
+                if let Some(path) = path.as_ref() {
+                    if let Some(parent) = path.parent()
+                        && !parent.exists()
+                        && let Err(e) = fs::create_dir_all(parent).await
+                    {
+                        tracing::error!("writing {parent:?} failed: {e}");
+                    }
+
+                    if let Err(e) = fs::write(&path, latest).await {
+                        tracing::error!("writing {path:?} failed: {e}");
+                    }
+                }
+
+                if closed {
+                    break;
+                }
+            }
+            tracing::info!("config writing bg exits");
+        };
+        Ok((res, bg))
+    }
+
+    pub fn try_write(&mut self) -> bool {
+        let content = match toml::to_string(&self.config) {
+            Ok(c) => c,
+            Err(e) => {
+                tracing::error!("failed to serialize config: {e}");
+                return false;
+            }
+        };
+        if self.writer.unbounded_send(content).is_err() {
+            tracing::warn!("failed to write config, channel is closed");
+            false
+        } else {
+            true
+        }
+    }
+}
+
+impl AsRef<Config> for ConfigManager {
+    fn as_ref(&self) -> &Config {
+        &self.config
+    }
+}
+
+impl AsMut<Config> for ConfigManager {
+    fn as_mut(&mut self) -> &mut Config {
+        &mut self.config
+    }
+}
+
+#[derive(
+    Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq, EnumIter, strum::Display,
+)]
+pub enum Placement {
+    #[default]
+    Dock,
+    Float,
+}
+
+#[derive(
+    Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq, EnumIter, strum::Display,
+)]
+pub enum IndicatorDisplay {
+    #[default]
+    Auto,
+    AlwaysOn,
+    AlwaysOff,
+}
+
+#[derive(
+    Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq, EnumIter, strum::Display,
+)]
+pub enum QuickActionBarState {
+    #[default]
+    Off,
+    On,
+    Toggle,
+}

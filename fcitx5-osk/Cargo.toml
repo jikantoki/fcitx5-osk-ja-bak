@@ -1,0 +1,51 @@
+[package]
+name = "fcitx5-osk"
+autobins = false
+authors.workspace = true
+version.workspace = true
+edition.workspace = true
+license-file.workspace = true
+keywords.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "fcitx5-osk-ja"
+path = "src/main.rs"
+
+[dependencies]
+fcitx5-osk-common.workspace = true
+
+anyhow.workspace = true
+clap.workspace = true
+figment.workspace = true
+getset.workspace = true
+iced.workspace = true
+serde.workspace = true
+tokio.workspace = true
+toml.workspace = true
+tracing.workspace = true
+xkeysym.workspace = true
+zbus.workspace = true
+zvariant.workspace = true
+iced_layershell.workspace = true
+iced_futures.workspace = true
+iced_graphics.workspace = true
+humantime-serde.workspace = true
+x11rb.workspace = true
+strum.workspace = true
+async-trait.workspace = true
+wayland-client.workspace = true
+wayland-protocols.workspace = true
+wayland-protocols-wlr.workspace = true
+num-traits.workspace = true
+reqwest = { workspace = true, optional = true }
+base64 = { workspace = true, optional = true }
+chrono = { workspace = true, optional = true }
+openssl = { workspace = true, optional = true }
+iced_drop.workspace = true
+uuid.workspace = true
+
+[features]
+default = ["custom-action-http-api"]
+console-subscriber = ["fcitx5-osk-common/console-subscriber"]
+custom-action-http-api = ["dep:reqwest", "dep:base64", "dep:chrono", "dep:openssl"]

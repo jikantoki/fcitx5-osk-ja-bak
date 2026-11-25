@@ -1,0 +1,3 @@
+[D-BUS Service]
+Name=xyz.enoki.fcitx5.osk.KwinLauncher
+Exec=@INSTALL_BIN_DIR@/fcitx5-osk-ja-kwin-launcher --dbus-server

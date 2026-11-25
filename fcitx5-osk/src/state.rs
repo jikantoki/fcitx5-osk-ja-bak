@@ -1,0 +1,476 @@
+use std::{
+    borrow::Cow,
+    future::Future,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+};
+
+use anyhow::Result;
+use getset::{CopyGetters, Getters, MutGetters};
+use iced::{
+    Element, Size, Task, Theme, Vector, futures::channel::mpsc::UnboundedSender, window::Id,
+};
+use zbus::Result as ZbusResult;
+
+use crate::{
+    app::{self, KeyboardNotification, MapTask, Message, error_with_context},
+    config::{Config, ConfigManager, IndicatorDisplay, Placement},
+    layout::{KLength, ToElementCommonParams},
+    store::Store,
+    window::{WindowManager, WindowManagerMode},
+};
+
+mod config;
+mod im;
+mod keyboard;
+mod layout;
+mod window;
+
+pub use config::{
+    BoolDesc, ConfigState, DynamicEnumDesc, EnumDesc, Field, FieldType, MultiSelectionDesc,
+    OwnedEnumDesc, RangeDesc, StepDesc, TextDesc, UpdateConfigEvent, ValueAndDescription,
+};
+pub use im::{ImEvent, ImState};
+pub use keyboard::{KeyEvent, KeyboardBackend, KeyboardEvent, KeyboardState};
+pub use layout::{LayoutEvent, LayoutState};
+pub use window::{CloseOpSource, WindowEvent, WindowManagerEvent, WindowManagerState};
+
+#[derive(CopyGetters, Getters, MutGetters)]
+pub struct State<WM> {
+    config: ConfigState,
+    #[getset(get_mut = "pub")]
+    store: Store,
+    #[getset(get_mut = "pub")]
+    keyboard: KeyboardState,
+    #[getset(get_mut = "pub")]
+    im: ImState,
+    #[getset(get = "pub", get_mut = "pub")]
+    window_manager: WindowManagerState<WM>,
+    detect_theme_enabled: Arc<AtomicBool>,
+    theme: Theme,
+    color_theme: u32,
+    session_manual_mode: Option<bool>,
+    // record if the keyboard is opened by a force show
+    #[getset(get_copy = "pub", get_mut = "pub")]
+    force_show: bool,
+}
+
+impl<WM> State<WM> {
+    pub fn new(
+        config_manager: ConfigManager,
+        wm: WM,
+        keyboard_backend: KeyboardBackend,
+        detect_theme_enabled: Arc<AtomicBool>,
+        tx: UnboundedSender<Message>,
+    ) -> Self {
+        let config = config_manager.as_ref();
+        let store = Store::new();
+        let portrait = false;
+        // key_area_layout will be updated when cur_im is updated.
+        let key_area_layout = store.key_area_layout_by_im("", portrait);
+        let mut state = Self {
+            keyboard: KeyboardState::new(
+                config.holding_timeout(),
+                &key_area_layout,
+                &store,
+                keyboard_backend.clone(),
+                tx,
+            ),
+            im: ImState::new(keyboard_backend.clone()),
+            window_manager: WindowManagerState::new(
+                config,
+                wm,
+                portrait,
+                key_area_layout,
+                keyboard_backend,
+            ),
+            detect_theme_enabled,
+            theme: Theme::Light,
+            color_theme: 0,
+            config: ConfigState::new(config_manager),
+            store,
+            session_manual_mode: None,
+            force_show: false,
+        };
+        state
+            .detect_theme_enabled
+            .store(state.is_auto_theme(), Ordering::SeqCst);
+        state.sync_theme(None);
+        state
+    }
+
+    fn is_auto_theme(&self) -> bool {
+        self.config.config().theme().eq_ignore_ascii_case("auto")
+    }
+
+    pub fn on_theme_event(&mut self, event: ThemeEvent) {
+        match event {
+            ThemeEvent::Detected(color_theme) => {
+                if self.is_auto_theme() {
+                    self.sync_theme(Some(color_theme));
+                }
+            }
+            ThemeEvent::Updated => {
+                self.sync_theme(None);
+            }
+        }
+    }
+
+    fn sync_theme(&mut self, color_theme: Option<u32>) {
+        let color_theme = color_theme.unwrap_or(self.color_theme);
+        let config = self.config.config();
+        let mut default_theme = Theme::Light;
+        let theme = if !self.is_auto_theme() {
+            self.store.theme(config.theme())
+        } else {
+            match color_theme {
+                1 => {
+                    default_theme = Theme::Dark;
+                    config.dark_theme().and_then(|t| self.store.theme(t))
+                }
+                _ => {
+                    default_theme = Theme::Light;
+                    config.light_theme().and_then(|t| self.store.theme(t))
+                }
+            }
+        };
+        self.theme = theme.cloned().unwrap_or(default_theme);
+        self.color_theme = color_theme;
+    }
+
+    pub fn update_keyboard_backend(&mut self, keyboard_backend: KeyboardBackend) {
+        self.im.update_keyboard_backend(keyboard_backend.clone());
+        self.keyboard
+            .update_keyboard_backend(keyboard_backend.clone());
+        self.window_manager
+            .update_keyboard_backend(keyboard_backend);
+    }
+}
+
+impl<WM> State<WM>
+where
+    WM: WindowManager,
+{
+    pub fn to_element(&self, id: Id) -> Element<'_, Message> {
+        self.window_manager.to_element(ToElementCommonParams {
+            state: self,
+            window_id: id,
+        })
+    }
+
+    pub fn active_manual_mode(&self) -> bool {
+        self.session_manual_mode()
+            .unwrap_or_else(|| self.config().manual_mode())
+    }
+
+    pub fn set_session_manual_mode(&mut self, session_manual_mode: bool) {
+        self.session_manual_mode = Some(session_manual_mode);
+    }
+
+    pub fn unset_session_manual_mode(&mut self) {
+        self.session_manual_mode.take();
+    }
+}
+
+impl<WM> State<WM>
+where
+    WM: WindowManager,
+    WM::Message: From<Message> + 'static + Send + Sync,
+{
+    pub fn on_update_config_event(&mut self, event: UpdateConfigEvent) -> Task<WM::Message> {
+        let task = self.config.on_update_event(event).map_task();
+
+        // Maybe I should check if theme is changed
+        self.detect_theme_enabled
+            .store(self.is_auto_theme(), Ordering::SeqCst);
+
+        task
+    }
+
+    fn update_layout_by_im(&mut self, im_name: Option<&str>) -> Option<Task<WM::Message>> {
+        let im_name = im_name
+            .or_else(|| self.im.im_name().map(String::as_str))
+            .unwrap_or_default();
+        let portrait = self.window_manager.is_portrait();
+        let key_area_layout = self
+            .store
+            .key_area_layout_by_im(im_name, self.window_manager.is_portrait());
+        let width = if portrait {
+            self.config().portrait_width()
+        } else {
+            self.config().landscape_width()
+        };
+        let task = self
+            .window_manager
+            .update_key_area_layout(width, key_area_layout.clone());
+        if task.is_some() {
+            self.keyboard
+                .update_key_area_layout(&key_area_layout, &self.store);
+            self.window_manager
+                .update_candidate_font(self.store.font_by_im(im_name));
+        }
+        task
+    }
+
+    fn update_cur_im(&mut self, im_name: &str) -> Task<WM::Message> {
+        if self.im.im_name().filter(|n| *n == im_name).is_some() {
+            // Don't update
+            return Message::from_nothing();
+        }
+        if let Some(task) = self.update_layout_by_im(Some(im_name)) {
+            self.im.update_cur_im(im_name);
+            task
+        } else {
+            Message::from_nothing()
+        }
+    }
+
+    pub fn on_im_event(&mut self, event: ImEvent) -> Task<WM::Message> {
+        match event {
+            ImEvent::UpdateCurrentIm(im) => self.update_cur_im(&im),
+            ImEvent::SelectCandidate(cursor) => self.keyboard.select_candidate(cursor).map_task(),
+            // make sure virtual keyboard mode of fcitx5 is activated
+            ImEvent::SelectIm(_) => self
+                .keyboard_mut()
+                .clear_fcitx5_hidden()
+                .chain(self.im.on_event(event))
+                .map_task(),
+            _ => self.im.on_event(event).map_task(),
+        }
+    }
+
+    pub fn on_layout_event(&mut self, event: LayoutEvent) -> Task<WM::Message> {
+        let task = if let LayoutEvent::SyncLayout = event {
+            self.update_layout_by_im(None)
+        } else {
+            let task = self.window_manager.on_layout_event(event);
+            if self.window_manager.is_setting_shown() {
+                self.config.refresh();
+            }
+            task
+        };
+        if let Some(task) = task {
+            task
+        } else {
+            Message::from_nothing()
+        }
+    }
+
+    pub fn on_store_event(&mut self, event: StoreEvent) -> Task<WM::Message> {
+        match event {
+            StoreEvent::Load(notify) => match Store::load(self.config.config()) {
+                Ok(s) => {
+                    self.store = s;
+                    // Update enabled custom actions
+                    self.keyboard.update_custom_actions(
+                        self.config.config().custom_actions().as_ref(),
+                        &self.store,
+                    );
+                    // Update theme after store is changed
+                    self.sync_theme(None);
+                    // Update layout by cur im after store is changed
+                    let mut task = self
+                        .update_layout_by_im(None)
+                        .unwrap_or_else(Message::from_nothing);
+                    if notify {
+                        task = task.chain(Task::done(
+                            Message::from(KeyboardNotification::Info("Assets loaded".to_string()))
+                                .into(),
+                        ));
+                    }
+                    task
+                }
+                Err(e) => {
+                    let msg = format!("Unable to load assets, caused by: {e:?}");
+                    Task::done(error_with_context(e, msg).into())
+                }
+            },
+            StoreEvent::UpdateCustomActions(custom_actions) => {
+                self.keyboard
+                    .update_custom_actions(&custom_actions, &self.store);
+                Message::from_nothing()
+            }
+        }
+    }
+}
+
+/// Use dyn for reducing the need for writing generic type.
+pub trait StateExtractor {
+    fn store(&self) -> &Store;
+
+    fn keyboard(&self) -> &KeyboardState;
+
+    fn im(&self) -> &ImState;
+
+    fn theme(&self) -> &Theme;
+
+    fn theme_names(&self) -> &[String];
+
+    fn config(&self) -> &Config;
+
+    fn updatable_fields(&self) -> &[Field];
+
+    fn available_candidate_width(&self) -> KLength;
+
+    fn keyboard_window_size(&self) -> Size<KLength>;
+
+    fn screen_size(&self) -> Size;
+
+    fn movable(&self, window_id: Id) -> bool;
+
+    /// It is used to calculate a logical size which contains no fraction after transforming to a
+    /// physical size
+    #[allow(unused)]
+    fn scale_factor(&self) -> f32;
+
+    fn new_position_message(&self, id: Id, delta: Vector) -> Option<Message>;
+
+    fn window_manager_mode(&self) -> WindowManagerMode;
+
+    fn placement(&self) -> Placement;
+
+    fn indicator_display(&self) -> IndicatorDisplay;
+
+    fn outputs(&self) -> Vec<(String, String)>;
+
+    /// Return the init value and cur value stored by ChangeTempText event
+    fn config_temp_text(&self, key: &str) -> Option<(&str, &str)>;
+
+    fn session_manual_mode(&self) -> Option<bool>;
+}
+
+impl<WM> StateExtractor for State<WM>
+where
+    WM: WindowManager,
+{
+    fn store(&self) -> &Store {
+        &self.store
+    }
+
+    fn keyboard(&self) -> &KeyboardState {
+        &self.keyboard
+    }
+
+    fn im(&self) -> &ImState {
+        &self.im
+    }
+
+    fn theme(&self) -> &Theme {
+        &self.theme
+    }
+
+    fn theme_names(&self) -> &[String] {
+        self.store.theme_names()
+    }
+
+    fn config(&self) -> &Config {
+        self.config.config()
+    }
+
+    fn updatable_fields(&self) -> &[Field] {
+        self.config.updatable_fields()
+    }
+
+    fn available_candidate_width(&self) -> KLength {
+        self.window_manager.available_candidate_width()
+    }
+
+    fn screen_size(&self) -> Size {
+        self.window_manager.screen_size()
+    }
+
+    fn keyboard_window_size(&self) -> Size<KLength> {
+        self.window_manager.keyboard_window_size()
+    }
+
+    fn movable(&self, window_id: Id) -> bool {
+        self.window_manager.movable(window_id)
+    }
+
+    fn scale_factor(&self) -> f32 {
+        self.window_manager.scale_factor()
+    }
+
+    fn new_position_message(&self, id: Id, delta: Vector) -> Option<Message> {
+        self.window_manager
+            .position(id)
+            .map(|p| Message::from(WindowEvent::Move(id, p + delta)))
+    }
+
+    fn window_manager_mode(&self) -> WindowManagerMode {
+        self.window_manager.mode()
+    }
+
+    fn placement(&self) -> Placement {
+        self.window_manager.placement()
+    }
+
+    fn indicator_display(&self) -> IndicatorDisplay {
+        self.window_manager.indicator_display()
+    }
+
+    fn outputs(&self) -> Vec<(String, String)> {
+        self.window_manager.outputs()
+    }
+
+    /// Return the init value and cur value stored by ChangeTempText event
+    fn config_temp_text(&self, key: &str) -> Option<(&str, &str)> {
+        self.config.temp_text(key)
+    }
+
+    fn session_manual_mode(&self) -> Option<bool> {
+        self.session_manual_mode
+    }
+}
+
+#[derive(Clone, Debug)]
+pub enum ThemeEvent {
+    Detected(u32),
+    Updated,
+}
+
+impl From<ThemeEvent> for Message {
+    fn from(value: ThemeEvent) -> Self {
+        Self::ThemeEvent(value)
+    }
+}
+
+#[derive(Clone, Debug)]
+pub enum StoreEvent {
+    Load(bool),
+    UpdateCustomActions(Arc<Vec<String>>),
+}
+
+impl From<StoreEvent> for Message {
+    fn from(value: StoreEvent) -> Self {
+        Self::StoreEvent(value)
+    }
+}
+
+fn call_dbus<S, M, FN, F>(service: &S, err_msg: M, f: FN) -> Task<Message>
+where
+    S: Clone,
+    M: Into<String>,
+    FN: FnOnce(S) -> F,
+    F: Future<Output = Result<Message>> + 'static + Send,
+{
+    let err_msg = err_msg.into();
+    let service = service.clone();
+    Task::perform(f(service), move |r| match r {
+        Err(e) => app::error_with_context(e, err_msg.clone()),
+        Ok(t) => t,
+    })
+}
+
+fn dbus_task<S, FN, F, T>(service: Cow<'_, S>, f: FN) -> Task<ZbusResult<T>>
+where
+    S: Clone,
+    FN: FnOnce(S) -> F,
+    F: Future<Output = ZbusResult<T>> + 'static + Send,
+    T: 'static,
+{
+    let service = service.into_owned();
+    Task::future(f(service))
+}
