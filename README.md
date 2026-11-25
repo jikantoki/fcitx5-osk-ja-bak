@@ -69,12 +69,16 @@ cp -r ~/.config/fcitx5-osk ~/.config/fcitx5-osk-ja
 ### かんたんインストール（おすすめ）
 
 ```bash
-git clone <このリポジトリのURL> fcitx5-osk-ja
+git clone https://github.com/jikantoki/fcitx5-osk-ja.git
 cd fcitx5-osk-ja
 ./install.sh --install
 ```
 
 `install.sh` は **deb パッケージ `dist/fcitx5-osk-ja.deb` を作る**スクリプトです。`--install` を付けると、作った deb を `apt` でインストールするところまで自動で行います（途中で sudo のパスワードを聞かれます）。
+
+root でも実行できます（`sudo ./install.sh --install`）。root のときは sudo を使わずにそのまま実行するので、
+root でしか書き込めない場所（Motivnavi OS の `/motivnavi/fcitx5-osk-ja` など）にソースを置いた場合や、
+Motivnavi Updater からのワンクリックインストールでも、途中で止まらずに最後まで進みます。
 
 1. ビルドに必要なパッケージを apt で入れる
 2. Rust（rustup の stable）を入れて最新にする（cmake が 4.1 未満なら snap 版を入れる）
@@ -104,9 +108,12 @@ deb には、アイコン用フォント（Symbols Nerd Font）と、アップ�
 - ターミナルで `fcitx5-osk-ja-update` を実行
 - アプリメニューの **「Fcitx 5 Osk JA を更新」** をクリック
 
+ソースのフォルダに書き込めない場合（root 所有の `/motivnavi` など）は、自動で sudo を付けて実行します。
+Motivnavi OS では、Motivnavi Updater からもアップデートできます。
+
 新しい版は、ログインし直すと反映されます。
 
-> **GitHub などに公開したら:** `install.sh` の先頭にある `REPO_URL` を自分のリポジトリの URL に書き換えてください。また、clone したフォルダの `origin` が公開先を向いているか確認してください（`git remote -v`）。アップデートはこの `origin` から取得します。
+> アップデートは clone したフォルダの `origin` から取得します（`git remote -v` で確認できます）。
 
 ### `install.sh` のオプション
 

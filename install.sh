@@ -13,14 +13,16 @@
 #    ./install.sh --force             バージョンが同じでも作り直す
 #    ./install.sh --src DIR           ソースの場所を指定する
 #
+#  普通のユーザーで実行すると、必要なところだけ sudo を使います。
+#  root でも実行できます（sudo ./install.sh --install、Motivnavi Updater からの実行など）。
+#
 #  インストール後は「fcitx5-osk-ja-update」コマンド、またはアプリメニューの
 #  「Fcitx 5 Osk JA を更新」で --update --install と同じことができます。
 # =============================================================================
 set -euo pipefail
 
 APP=fcitx5-osk-ja
-# ↓ GitHub 等に公開したら、自分のリポジトリの URL に書き換えてください
-REPO_URL="${FCITX5_OSK_JA_REPO:-https://github.com/CHANGE_ME/fcitx5-osk-ja.git}"
+REPO_URL="${FCITX5_OSK_JA_REPO:-https://github.com/jikantoki/fcitx5-osk-ja.git}"
 BRANCH="${FCITX5_OSK_JA_BRANCH:-main}"
 MAINTAINER="${DEBFULLNAME:-enoki} <${DEBEMAIL:-enoki@localhost}>"
 
@@ -37,6 +39,31 @@ die()  { echo "${c_err}✘ $*${c_off}" >&2; exit 1; }
 
 version_ge() { [ "$(printf '%s\n%s\n' "$2" "$1" | sort -V | head -n1)" = "$2" ]; }
 
+is_root() { [ "$(id -u)" -eq 0 ]; }
+
+# root で実行されているときは sudo を付けずに、普通のユーザーなら sudo で実行する
+as_root() {
+    if is_root; then "$@"; else sudo "$@"; fi
+}
+# apt-get を対話なしで実行する（画面のないアップデーターから呼ばれても止まらないように）
+apt_root() { as_root env DEBIAN_FRONTEND=noninteractive apt-get "$@"; }
+
+# ソースのフォルダに対する git。root で他人のフォルダを触っても止まらないよう safe.directory を付け、
+# chmod で権限だけ変わったファイルを「変更あり」と扱わないよう core.fileMode=false にする
+src_git() { git -c safe.directory="$src" -c core.fileMode=false -C "$src" "$@"; }
+
+# root で実行していて、ソースのフォルダが普通のユーザーの持ち物なら、そのユーザーとして実行する
+# （git pull で root 所有のファイルが混ざらないように）
+as_src_owner() {
+    local uid user
+    uid="$(stat -c %u "$src" 2>/dev/null || echo 0)"
+    if is_root && [ "$uid" != 0 ] && user="$(getent passwd "$uid" | cut -d: -f1)" && [ -n "$user" ]; then
+        runuser -u "$user" -- "$@"
+    else
+        "$@"
+    fi
+}
+
 pause_if_terminal_launch() {
     # アプリメニューから起動したとき、ウィンドウがすぐ閉じないようにする
     if [ "${FCITX5_OSK_JA_PAUSE:-0}" = 1 ]; then
@@ -52,13 +79,13 @@ main() {
             --force) force=1 ;;
             --install) do_install=1 ;;
             --src) shift; src="${1:?--src にはフォルダを指定してください}" ;;
-            -h|--help) sed -n '2,20p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; trap - EXIT; exit 0 ;;
+            -h|--help) sed -n '3,20p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; trap - EXIT; exit 0 ;;
             *) die "不明なオプション: $1（--help で使い方を表示）" ;;
         esac
         shift
     done
 
-    [ "$(id -u)" -ne 0 ] || die "root ではなく普通のユーザーで実行してください（必要なところで sudo を使います）"
+    if is_root; then info "root で実行しています（sudo は使いません）"; fi
     command -v apt-get >/dev/null || die "apt が見つかりません。Ubuntu / Kubuntu で実行してください"
 
     # ---- ソースの場所を決める -------------------------------------------------
@@ -83,8 +110,8 @@ main() {
     done
     if [ ${#missing[@]} -gt 0 ]; then
         info "インストールします: ${missing[*]}"
-        sudo apt-get update
-        sudo apt-get install -y "${missing[@]}"
+        apt_root update
+        apt_root install -y "${missing[@]}"
     fi
     ok "パッケージ OK"
 
@@ -96,7 +123,7 @@ main() {
             cmake_bin=/snap/bin/cmake
         elif command -v snap >/dev/null; then
             info "cmake $cmake_ver は古いので、snap 版の cmake を入れます"
-            sudo snap install cmake --classic
+            as_root snap install cmake --classic
             cmake_bin=/snap/bin/cmake
         else
             die "cmake $MIN_CMAKE 以上が必要です（今は $cmake_ver）"
@@ -111,7 +138,7 @@ main() {
             : # 自分で入れた cargo があればそれを使う
         else
             info "rustup をインストールします"
-            sudo apt-get install -y rustup || {
+            apt_root install -y rustup || {
                 warn "apt の rustup が使えないので、公式スクリプトで入れます"
                 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
             }
@@ -132,25 +159,31 @@ main() {
         mkdir -p "$(dirname "$src")"
         git clone --branch "$BRANCH" "$REPO_URL" "$src"
     elif [ "$mode" = update ]; then
-        if [ -d "$src/.git" ] && git -C "$src" rev-parse --abbrev-ref --symbolic-full-name '@{u}' >/dev/null 2>&1; then
+        if [ -d "$src/.git" ] && src_git rev-parse --abbrev-ref --symbolic-full-name '@{u}' >/dev/null 2>&1; then
             info "ソースを更新しています（git pull）"
-            git -C "$src" pull --ff-only || die "git pull に失敗しました。$src の変更を確認してください"
+            as_src_owner git -c safe.directory="$src" -c core.fileMode=false -C "$src" pull --ff-only \
+                || die "git pull に失敗しました。$src の変更を確認してください"
         else
             warn "追跡するリモートブランチが無いので、git pull はスキップします"
         fi
     fi
     mkdir -p "$STATE_DIR"
     echo "$src" > "$STATE_DIR/source-dir"
+    if is_root; then
+        # root でインストールしたときは、普通のユーザーの fcitx5-osk-ja-update からも場所が分かるようにする
+        mkdir -p /var/lib/$APP
+        echo "$src" > /var/lib/$APP/source-dir
+    fi
     ok "ソース: $src"
 
     # ---- 5. バージョン番号 -----------------------------------------------------
     local base count hash version
     base="$(grep -m1 '^version' "$src/Cargo.toml" | sed -E 's/.*"([^"]+)".*/\1/')"
-    if [ -d "$src/.git" ] && git -C "$src" rev-parse -q --verify HEAD >/dev/null; then
-        count="$(git -C "$src" rev-list --count HEAD)"
-        hash="$(git -C "$src" rev-parse --short HEAD)"
+    if [ -d "$src/.git" ] && src_git rev-parse -q --verify HEAD >/dev/null; then
+        count="$(src_git rev-list --count HEAD)"
+        hash="$(src_git rev-parse --short HEAD)"
         version="${base}+git${count}.${hash}"
-        if [ -n "$(git -C "$src" status --porcelain --untracked-files=no)" ]; then
+        if [ -n "$(src_git status --porcelain --untracked-files=no)" ]; then
             version="${version}.local$(date +%Y%m%d%H%M)"
         fi
     else
@@ -166,6 +199,12 @@ main() {
     else
         info "バージョン: ${built:-なし} → $version"
         build_deb "$src" "$version" "$mode" "$cmake_bin" "$deb"
+        # root で普通のユーザーのフォルダにビルドしたときは、できたファイルの持ち主を戻す
+        local owner
+        owner="$(stat -c %u:%g "$src")"
+        if is_root && [ "${owner%%:*}" != 0 ]; then
+            chown -R "$owner" "$src/build-deb" "$dist" 2>/dev/null || true
+        fi
     fi
 
     if [ "$do_install" = 0 ]; then
@@ -214,12 +253,18 @@ build_deb() {
 #!/bin/sh
 # fcitx5-osk-ja を最新版にアップデートする（git pull → deb 作成 → apt インストール）
 STATE="${XDG_STATE_HOME:-$HOME/.local/state}/fcitx5-osk-ja/source-dir"
-if [ ! -f "$STATE" ] || [ ! -x "$(cat "$STATE")/install.sh" ]; then
+[ -f "$STATE" ] || STATE=/var/lib/fcitx5-osk-ja/source-dir
+if [ ! -f "$STATE" ]; then
     echo "ソースの場所が分かりません。ソースのフォルダで ./install.sh --install を一度実行してください" >&2
     [ "${FCITX5_OSK_JA_PAUSE:-0}" = 1 ] && { printf "Enter キーで閉じます..."; read -r _; }
     exit 1
 fi
-exec "$(cat "$STATE")/install.sh" --update --install "$@"
+SRC="$(cat "$STATE")"
+# ソースのフォルダに書き込めない（root 所有の /motivnavi など）ときは sudo で実行する
+if [ "$(id -u)" -ne 0 ] && { [ ! -w "$SRC" ] || [ ! -r "$SRC/install.sh" ]; }; then
+    exec sudo env FCITX5_OSK_JA_PAUSE="${FCITX5_OSK_JA_PAUSE:-0}" bash "$SRC/install.sh" --update --install "$@"
+fi
+exec bash "$SRC/install.sh" --update --install "$@"
 EOF
     chmod 755 "$pkg/usr/bin/$APP-update"
     install -d "$pkg/usr/share/applications"
@@ -329,9 +374,9 @@ install_deb() {
     cp "$deb" "$tmpdeb"; chmod 644 "$tmpdeb"
     info "apt でインストールしています"
     if [ "$force" = 1 ] && [ "$installed" = "$version" ]; then
-        sudo apt-get install -y --reinstall "$tmpdeb"
+        apt_root install -y --reinstall "$tmpdeb"
     else
-        sudo apt-get install -y "$tmpdeb"
+        apt_root install -y "$tmpdeb"
     fi
     rm -f "$tmpdeb"
 
