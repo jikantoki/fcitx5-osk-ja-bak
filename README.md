@@ -132,6 +132,21 @@ Motivnavi OS では、Motivnavi Updater からもアップデートできます�
 sudo apt remove fcitx5-osk-ja
 ```
 
+### オリジナル版（fcitx5-osk）からの移行
+
+オリジナルの fcitx5-osk を cmake で入れていた環境では、fcitx5-osk-ja の deb をインストールしたあとに、移行スクリプトを実行してください。
+
+```bash
+sudo ./tools/migrate-from-fcitx5-osk.sh                          # 何が変わるかを表示するだけ
+sudo ./tools/migrate-from-fcitx5-osk.sh --apply                  # 実行する
+sudo ./tools/migrate-from-fcitx5-osk.sh --apply --include-home   # 既存ユーザーの設定も移行する
+```
+
+- オリジナル版が入れたファイル（`/usr/local` など）を削除します
+- `/etc/skel`・`/etc/xdg`・`/etc/sddm.conf.d`・`/usr/share/kubuntu-default-settings` などにある設定の参照を fcitx5-osk-ja 用に書き換えます（パッケージ管理下のファイルは書き換えません）
+- 新規ユーザーの既定の仮想キーボードを「Fcitx 5 Osk JA Kwin Launcher」にします（`/etc/xdg/kwinrc`、あれば `/etc/skel/.config/kwinrc`）
+- 変更・削除したファイルは `/var/backups/fcitx5-osk-ja-migrate/<日時>/` に残ります
+
 ### 手動でビルドする（cmake）
 
 deb を使わずに、`/usr/local` に直接インストールする方法です。
